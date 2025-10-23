@@ -103,11 +103,11 @@ async def ca_handler(event):
     except Exception as e:
         logger.warning('Error in Telegram message handler: %s', e)
 
-@bot_client.on(events.NewMessage(pattern='/config'))
+@bot_client.on(events.NewMessage(pattern='/start'))
 async def start_config(event):
     user_id = event.sender_id
     user_states[user_id] = 'waiting_target'
-    await event.reply('Please provide the target channel ID.')
+    await event.reply('Info Forwarder:\nPlease provide the target channel ID.')
 
 @bot_client.on(events.NewMessage)
 async def handle_message(event):
@@ -118,6 +118,8 @@ async def handle_message(event):
     state = user_states[user_id]
 
     if isinstance(state, str) and state == 'waiting_target':
+        if not event.text:  # Skip if no input yet
+            return
         try:
             target = int(event.text)
             user_states[user_id] = 'waiting_user_channel'
@@ -126,6 +128,8 @@ async def handle_message(event):
             await event.reply('Invalid ID. Try again.')
 
     elif isinstance(state, str) and state == 'waiting_user_channel':
+        if not event.text:  # Skip if no input yet
+            return
         try:
             user_channel = int(event.text)
             user_states[user_id] = 'waiting_password'
@@ -205,7 +209,7 @@ async def start_forward(event):
 
     row = cur.execute('SELECT encrypted_blob FROM users WHERE user_id=?', (user_id,)).fetchone()
     if not row:
-        await event.reply('No configuration found. Use /config first.')
+        await event.reply('No configuration found. Use /start first.')
         return
 
     encrypted = row[0]
@@ -229,7 +233,7 @@ async def start_forward(event):
     try:
         perms = await client.get_permissions(user_channel, me)
         if not perms.post_messages:
-            raise Exception('No post permissions')
+            raise Exception('No post messages')
     except Exception:
         await bot_client.send_message(user_id, 'BOT IS NOT ADMIN IN YOUR CHANNEL/GROUP, ADD BOT AS ADMIN')
         await client.disconnect()
