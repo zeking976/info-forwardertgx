@@ -26,23 +26,34 @@ logger = logging.getLogger(__name__)
 
 # Ensure bot.db directory and file have proper permissions
 db_path = 'bot.db'
+db_dir = os.path.dirname(db_path) or '.'
 if not os.path.exists(db_path):
     with open(db_path, 'a'):  # Create file with write access
         pass
-os.chmod(db_path, 0o664)  # Ensure read/write for owner and group
-os.chmod(os.path.dirname(db_path) or '.', 0o755)  # Ensure directory is writable
-
-conn = sqlite3.connect(db_path, check_same_thread=False)
-cur = conn.cursor()
+    os.chmod(db_path, 0o664)  # Read/write for owner and group
+os.chmod(db_dir, 0o755)  # Ensure directory is writable
 try:
+    conn = sqlite3.connect(db_path, check_same_thread=False)
+    cur = conn.cursor()
     cur.execute('''CREATE TABLE IF NOT EXISTS users 
                    (user_id INTEGER PRIMARY KEY, encrypted_blob BLOB)''')
     cur.execute('''CREATE TABLE IF NOT EXISTS config 
                    (key TEXT PRIMARY KEY, value TEXT)''')
     conn.commit()
 except sqlite3.OperationalError as e:
-    logger.error(f"Failed to initialize database: {e}")
-    raise
+    logger.error(f"Failed to initialize database at {db_path}: {e}")
+    if os.path.exists(db_path):
+        os.remove(db_path)
+    with open(db_path, 'a'):
+        pass
+    os.chmod(db_path, 0o664)
+    conn = sqlite3.connect(db_path, check_same_thread=False)
+    cur = conn.cursor()
+    cur.execute('''CREATE TABLE IF NOT EXISTS users 
+                   (user_id INTEGER PRIMARY KEY, encrypted_blob BLOB)''')
+    cur.execute('''CREATE TABLE IF NOT EXISTS config 
+                   (key TEXT PRIMARY KEY, value TEXT)''')
+    conn.commit()
 
 def get_config(key):
     try:
@@ -120,7 +131,7 @@ async def ca_handler(event):
         logger.info('🔥 CA: %s', ca)
 
     except Exception as e:
-        logger.warning('Error in Telegram message handler: %s', e)
+        logger.warning('Error in Telegram message handler: {e}')
 
 @bot_client.on(events.NewMessage(pattern=r'^/start$'))
 async def start_config(event):
@@ -227,7 +238,7 @@ async def handle_message(event):
 @bot_client.on(events.NewMessage(pattern=r'^/start_forward (.*)$'))
 async def start_forward(event):
     user_id = event.sender_id
-    password = event.pattern_match.group(1).strip()  # Extract password from the command
+    password = event.pattern_match.group(1).strip()  # Extract and clean password
     logger.info(f"Attempting to start forwarding with password: {password}")  # Debug log
 
     row = cur.execute('SELECT encrypted_blob FROM users WHERE user_id=?', (user_id,)).fetchone()
@@ -240,7 +251,9 @@ async def start_forward(event):
     f = Fernet(key)
     try:
         decrypted = f.decrypt(encrypted)
+        logger.info(f"Decrypted data successfully with password: {password}")  # Debug success
     except InvalidToken:
+        logger.warning(f"Password mismatch for user {user_id} with input: {password}")
         await event.reply('Wrong password. Please ensure the password matches the one used during configuration and try again.')
         return
 
@@ -274,9 +287,13 @@ async def start_forward(event):
         user_running[user_id] = {'client': client, 'target': target, 'user_channel': user_channel}
         await event.reply('Forwarding started.')
     except Exception as e:
+        logger.error(f"Forwarding error for user {user_id}: {e}")
         await event.reply(f'Error starting forwarding: {str(e)}. Please try again.')
         if 'client' in locals():
-            await client.disconnect()
+            try:
+                await client.disconnect()
+            except Exception as disconnect_err:
+                logger.error(f"Error during disconnect: {disconnect_err}")
 
 @bot_client.on(events.NewMessage(pattern=r'^/stop_forward$'))
 async def stop_forward(event):
@@ -286,7 +303,10 @@ async def stop_forward(event):
         return
 
     client = user_running[user_id]['client']
-    await client.disconnect()
+    try:
+        await client.disconnect()
+    except Exception as e:
+        logger.error(f"Error stopping forward for user {user_id}: {e}")
     del user_running[user_id]
     await event.reply('Forwarding stopped.')
 
@@ -317,7 +337,7 @@ async def delete_session(event):
         conn.commit()
         await event.reply('Session deleted successfully. Use /start to reconfigure.')
     except sqlite3.OperationalError as e:
-        logger.error(f"Error deleting session: {e}")
+        logger.error(f"Error deleting session for user {user_id}: {e}")
         await event.reply('Error deleting session. Please try again or check logs.')
 
 @bot_client.on(events.CallbackQuery)
