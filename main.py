@@ -74,7 +74,7 @@ def set_config(key, value):
 if get_config('ca_filter') is None:
     set_config('ca_filter', 'off')
 
-bot_client = TelegramClient('bot', API_ID, API_HASH).start(bot_token=BOT_TOKEN)
+bot_client = TelegramClient('bot', API_ID, API_HASH)
 
 user_states = {}  # For configuration steps
 user_running = {}  # For running clients: {user_id: {'client': client, 'target': target, 'user_channel': user_channel}}
@@ -386,6 +386,12 @@ async def main():
         await bot_client.run_until_disconnected()
     except Exception as e:
         logger.error(f"Bot failed to start or run: {e}")
+    finally:
+        # Cleanup pending tasks
+        pending = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
+        for task in pending:
+            task.cancel()
+        await asyncio.gather(*pending, return_exceptions=True)
 
 if __name__ == '__main__':
     asyncio.run(main())
