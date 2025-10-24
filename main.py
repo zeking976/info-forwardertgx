@@ -203,6 +203,7 @@ async def handle_message(event):
 
             # Save the session string directly
             session_str = temp_client.session.save()
+            logger.info(f"Generated session string: {session_str[:20]}...")  # Log partial session for debug
 
             os.remove('temp.session')
 
@@ -252,6 +253,8 @@ async def start_forward(event):
     try:
         decrypted = f.decrypt(encrypted)
         logger.info(f"Decrypted data successfully with password: {password}")  # Debug success
+        data = json.loads(decrypted.decode('utf-8'))
+        logger.info(f"Decrypted session string (partial): {data['session'][:20]}...")  # Log partial session for debug
     except InvalidToken:
         logger.warning(f"Password mismatch for user {user_id} with input: {password}")
         await event.reply('Wrong password. Please ensure the password matches the one used during configuration and try again.')
