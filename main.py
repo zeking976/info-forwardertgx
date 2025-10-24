@@ -196,19 +196,18 @@ async def handle_message(event):
             conn.commit()
 
             await event.reply('Configuration saved successfully. Use /start_forward <password> to start forwarding.')
-
             del user_states[user_id]
 
         except Exception as e:
-            await event.reply(f'Error: {str(e)}')
+            await event.reply(f'Error: {str(e)}. Please try again.')
             if os.path.exists('temp.session'):
                 os.remove('temp.session')
             del user_states[user_id]
 
-@bot_client.on(events.NewMessage(pattern=r'/start_forward (.+)'))
+@bot_client.on(events.NewMessage(pattern=r'/start_forward (.*)'))
 async def start_forward(event):
     user_id = event.sender_id
-    password = event.matches[0].group(1)
+    password = event.pattern_match.group(1).strip()  # Extract password from the command
 
     row = cur.execute('SELECT encrypted_blob FROM users WHERE user_id=?', (user_id,)).fetchone()
     if not row:
@@ -221,38 +220,42 @@ async def start_forward(event):
     try:
         decrypted = f.decrypt(encrypted)
     except InvalidToken:
-        await event.reply('Wrong password.')
+        await event.reply('Wrong password. Please try again.')
         return
 
-    data = json.loads(decrypted.decode('utf-8'))
-    target = data['target']
-    user_channel = data['user_channel']
-    session_str = data['session']
-
-    client = TelegramClient(StringSession(session_str), API_ID, API_HASH)
-    await client.start()
-
-    me = await client.get_me()
     try:
-        perms = await client.get_permissions(user_channel, me)
-        if not perms.post_messages:
-            raise Exception('No post messages')
-    except Exception:
-        await bot_client.send_message(user_id, 'BOT IS NOT ADMIN IN YOUR CHANNEL/GROUP, ADD BOT AS ADMIN')
-        await client.disconnect()
-        return
+        data = json.loads(decrypted.decode('utf-8'))
+        target = data['target']
+        user_channel = data['user_channel']
+        session_str = data['session']
 
-    async def forward_handler(event):
-        await client.forward_messages(user_channel, event.message)
+        client = TelegramClient(StringSession(session_str), API_ID, API_HASH)
+        await client.start()
 
-    client.add_event_handler(forward_handler, events.NewMessage(chats=target))
+        me = await client.get_me()
+        try:
+            perms = await client.get_permissions(user_channel, me)
+            if not perms.post_messages:
+                raise Exception('No post messages')
+        except Exception:
+            await bot_client.send_message(user_id, 'BOT IS NOT ADMIN IN YOUR CHANNEL/GROUP, ADD BOT AS ADMIN')
+            await client.disconnect()
+            return
 
-    if user_id == DEV_USER_ID and get_config('ca_filter') == 'on':
-        client.add_event_handler(ca_handler, events.NewMessage(chats=target))
+        async def forward_handler(event):
+            await client.forward_messages(user_channel, event.message)
 
-    user_running[user_id] = {'client': client, 'target': target, 'user_channel': user_channel}
+        client.add_event_handler(forward_handler, events.NewMessage(chats=target))
 
-    await event.reply('Forwarding started.')
+        if user_id == DEV_USER_ID and get_config('ca_filter') == 'on':
+            client.add_event_handler(ca_handler, events.NewMessage(chats=target))
+
+        user_running[user_id] = {'client': client, 'target': target, 'user_channel': user_channel}
+        await event.reply('Forwarding started.')
+    except Exception as e:
+        await event.reply(f'Error starting forwarding: {str(e)}. Please try again.')
+        if 'client' in locals():
+            await client.disconnect()
 
 @bot_client.on(events.NewMessage(pattern='/stop_forward'))
 async def stop_forward(event):
