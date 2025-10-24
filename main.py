@@ -106,47 +106,53 @@ async def ca_handler(event):
 @bot_client.on(events.NewMessage(pattern='/start'))
 async def start_config(event):
     user_id = event.sender_id
-    user_states[user_id] = 'waiting_target'
+    user_states[user_id] = {'state': 'waiting_target', 'data': {}}
     await event.reply('Info Forwarder:\nPlease provide the target channel ID.')
 
 @bot_client.on(events.NewMessage)
 async def handle_message(event):
     user_id = event.sender_id
-    if user_id not in user_states:
+    if user_id not in user_states or not isinstance(user_states[user_id], dict):
         return
 
-    state = user_states[user_id]
+    state = user_states[user_id]['state']
+    data = user_states[user_id]['data']
 
-    if isinstance(state, str) and state == 'waiting_target':
+    if state == 'waiting_target':
         if not event.text:  # Skip if no input yet
             return
         try:
             target = int(event.text)
-            user_states[user_id] = 'waiting_user_channel'
+            data['target'] = target
+            user_states[user_id]['state'] = 'waiting_user_channel'
             await event.reply('Now provide your channel ID.')
         except ValueError:
             await event.reply('Invalid ID. Try again.')
 
-    elif isinstance(state, str) and state == 'waiting_user_channel':
+    elif state == 'waiting_user_channel':
         if not event.text:  # Skip if no input yet
             return
         try:
             user_channel = int(event.text)
-            user_states[user_id] = 'waiting_password'
+            data['user_channel'] = user_channel
+            user_states[user_id]['state'] = 'waiting_password'
             await event.reply('Now provide a password for encryption.')
-            user_states[user_id + '_temp'] = (target, user_channel)  # Temp store
         except ValueError:
             await event.reply('Invalid ID. Try again.')
 
-    elif isinstance(state, str) and state == 'waiting_password':
+    elif state == 'waiting_password':
         password = event.text
-        target, user_channel = user_states[user_id + '_temp']
-        user_states[user_id] = 'waiting_session'
-        user_states[user_id + '_temp'] = (target, user_channel, password)
+        target = data.get('target')
+        user_channel = data.get('user_channel')
+        if target is None or user_channel is None:
+            await event.reply('Configuration error. Please restart with /start.')
+            del user_states[user_id]
+            return
+        data['password'] = password
+        user_states[user_id]['state'] = 'waiting_session'
         await event.reply('Now upload the Telegram session file (must end with .session).')
-        del user_states[user_id + '_temp']  # Clean up after use? No, keep for next.
 
-    elif isinstance(state, str) and state == 'waiting_session':
+    elif state == 'waiting_session':
         if not event.message.document:
             return
         file_name = event.message.document.attributes[0].file_name if event.message.document.attributes else ''
@@ -174,12 +180,18 @@ async def handle_message(event):
 
             os.remove('temp.session')
 
-            # Get temp data
-            target, user_channel, password = user_states[user_id + '_temp']
+            # Get data
+            target = data.get('target')
+            user_channel = data.get('user_channel')
+            password = data.get('password')
+            if any(x is None for x in [target, user_channel, password]):
+                await event.reply('Configuration error. Please restart with /start.')
+                del user_states[user_id]
+                return
 
             # Encrypt data
-            data = {'target': target, 'user_channel': user_channel, 'session': session_str}
-            json_bytes = json.dumps(data).encode('utf-8')
+            data_to_encrypt = {'target': target, 'user_channel': user_channel, 'session': session_str}
+            json_bytes = json.dumps(data_to_encrypt).encode('utf-8')
             key = derive_key(password)
             f = Fernet(key)
             encrypted = f.encrypt(json_bytes)
@@ -191,16 +203,12 @@ async def handle_message(event):
             await event.reply('Configuration saved successfully. Use /start_forward <password> to start forwarding.')
 
             del user_states[user_id]
-            if user_id + '_temp' in user_states:
-                del user_states[user_id + '_temp']
 
         except Exception as e:
             await event.reply(f'Error: {str(e)}')
             if os.path.exists('temp.session'):
                 os.remove('temp.session')
             del user_states[user_id]
-            if user_id + '_temp' in user_states:
-                del user_states[user_id + '_temp']
 
 @bot_client.on(events.NewMessage(pattern=r'/start_forward (.+)'))
 async def start_forward(event):
