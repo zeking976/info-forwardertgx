@@ -24,21 +24,40 @@ DEV_USER_ID = int(os.getenv('DEV_TELEGRAM_USER_ID'))
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-conn = sqlite3.connect('bot.db')
+# Ensure bot.db directory and file have proper permissions
+db_path = 'bot.db'
+if not os.path.exists(db_path):
+    with open(db_path, 'a'):  # Create file with write access
+        pass
+os.chmod(db_path, 0o664)  # Ensure read/write for owner and group
+os.chmod(os.path.dirname(db_path) or '.', 0o755)  # Ensure directory is writable
+
+conn = sqlite3.connect(db_path, check_same_thread=False)
 cur = conn.cursor()
-cur.execute('''CREATE TABLE IF NOT EXISTS users 
-               (user_id INTEGER PRIMARY KEY, encrypted_blob BLOB)''')
-cur.execute('''CREATE TABLE IF NOT EXISTS config 
-               (key TEXT PRIMARY KEY, value TEXT)''')
-conn.commit()
+try:
+    cur.execute('''CREATE TABLE IF NOT EXISTS users 
+                   (user_id INTEGER PRIMARY KEY, encrypted_blob BLOB)''')
+    cur.execute('''CREATE TABLE IF NOT EXISTS config 
+                   (key TEXT PRIMARY KEY, value TEXT)''')
+    conn.commit()
+except sqlite3.OperationalError as e:
+    logger.error(f"Failed to initialize database: {e}")
+    raise
 
 def get_config(key):
-    row = cur.execute('SELECT value FROM config WHERE key=?', (key,)).fetchone()
-    return row[0] if row else None
+    try:
+        row = cur.execute('SELECT value FROM config WHERE key=?', (key,)).fetchone()
+        return row[0] if row else None
+    except sqlite3.OperationalError as e:
+        logger.error(f"Error reading config: {e}")
+        return None
 
 def set_config(key, value):
-    cur.execute('INSERT OR REPLACE INTO config (key, value) VALUES (?, ?)', (key, value))
-    conn.commit()
+    try:
+        cur.execute('INSERT OR REPLACE INTO config (key, value) VALUES (?, ?)', (key, value))
+        conn.commit()
+    except sqlite3.OperationalError as e:
+        logger.error(f"Error writing config: {e}")
 
 # Default ca_filter to 'off' if not set
 if get_config('ca_filter') is None:
@@ -103,13 +122,14 @@ async def ca_handler(event):
     except Exception as e:
         logger.warning('Error in Telegram message handler: %s', e)
 
-@bot_client.on(events.NewMessage(pattern='/start'))
+@bot_client.on(events.NewMessage(pattern=r'^/start$'))
 async def start_config(event):
     user_id = event.sender_id
-    user_states[user_id] = {'state': 'waiting_target', 'data': {}}
-    await event.reply('Info Forwarder:\nPlease provide the target channel ID.')
+    if user_id not in user_states or user_states[user_id].get('state') != 'waiting_target':
+        user_states[user_id] = {'state': 'waiting_target', 'data': {}}
+        await event.reply('Info Forwarder:\nPlease provide the target channel ID.')
 
-@bot_client.on(events.NewMessage)
+@bot_client.on(events.NewMessage(func=lambda e: e.is_private and not e.message.message.startswith('/')))
 async def handle_message(event):
     user_id = event.sender_id
     if user_id not in user_states or not isinstance(user_states[user_id], dict):
@@ -204,10 +224,11 @@ async def handle_message(event):
                 os.remove('temp.session')
             del user_states[user_id]
 
-@bot_client.on(events.NewMessage(pattern=r'/start_forward (.*)'))
+@bot_client.on(events.NewMessage(pattern=r'^/start_forward (.*)$'))
 async def start_forward(event):
     user_id = event.sender_id
     password = event.pattern_match.group(1).strip()  # Extract password from the command
+    logger.info(f"Attempting to start forwarding with password: {password}")  # Debug log
 
     row = cur.execute('SELECT encrypted_blob FROM users WHERE user_id=?', (user_id,)).fetchone()
     if not row:
@@ -220,7 +241,7 @@ async def start_forward(event):
     try:
         decrypted = f.decrypt(encrypted)
     except InvalidToken:
-        await event.reply('Wrong password. Please try again.')
+        await event.reply('Wrong password. Please ensure the password matches the one used during configuration and try again.')
         return
 
     try:
@@ -257,7 +278,7 @@ async def start_forward(event):
         if 'client' in locals():
             await client.disconnect()
 
-@bot_client.on(events.NewMessage(pattern='/stop_forward'))
+@bot_client.on(events.NewMessage(pattern=r'^/stop_forward$'))
 async def stop_forward(event):
     user_id = event.sender_id
     if user_id not in user_running:
@@ -269,10 +290,11 @@ async def stop_forward(event):
     del user_running[user_id]
     await event.reply('Forwarding stopped.')
 
-@bot_client.on(events.NewMessage(pattern='/settings'))
+@bot_client.on(events.NewMessage(pattern=r'^/settings$'))
 async def settings(event):
     user_id = event.sender_id
     if user_id != DEV_USER_ID:
+        await event.reply('This command is restricted to the developer.')
         return
 
     current = get_config('ca_filter') or 'off'
@@ -286,6 +308,17 @@ async def settings(event):
         ]
     )
     await event.reply('Settings', reply_markup=markup)
+
+@bot_client.on(events.NewMessage(pattern=r'^/delete_session$'))
+async def delete_session(event):
+    user_id = event.sender_id
+    try:
+        cur.execute('DELETE FROM users WHERE user_id=?', (user_id,))
+        conn.commit()
+        await event.reply('Session deleted successfully. Use /start to reconfigure.')
+    except sqlite3.OperationalError as e:
+        logger.error(f"Error deleting session: {e}")
+        await event.reply('Error deleting session. Please try again or check logs.')
 
 @bot_client.on(events.CallbackQuery)
 async def handle_callback(event):
@@ -319,9 +352,12 @@ async def handle_callback(event):
                 client.remove_event_handler(ca_handler)
 
 async def main():
-    await bot_client.start(bot_token=BOT_TOKEN)
-    print('Bot is running.')
-    await bot_client.run_until_disconnected()
+    try:
+        await bot_client.start(bot_token=BOT_TOKEN)
+        print('Bot is running.')
+        await bot_client.run_until_disconnected()
+    except Exception as e:
+        logger.error(f"Bot failed to start or run: {e}")
 
 if __name__ == '__main__':
     asyncio.run(main())
