@@ -24,9 +24,9 @@ DEV_USER_ID = int(os.getenv('DEV_TELEGRAM_USER_ID'))
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Ensure bot.db directory and file have proper permissions
-db_path = 'bot.db'
-db_dir = os.path.dirname(db_path) or '.'
+# Move database to /tmp to avoid readonly root filesystem issues
+db_path = '/tmp/bot.db'
+db_dir = os.path.dirname(db_path) or '/tmp'
 if not os.path.exists(db_path):
     with open(db_path, 'a'):  # Create file with write access
         pass
@@ -74,7 +74,7 @@ def set_config(key, value):
 if get_config('ca_filter') is None:
     set_config('ca_filter', 'off')
 
-bot_client = TelegramClient('bot', API_ID, API_HASH)
+bot_client = TelegramClient('bot', API_ID, API_HASH).start(bot_token=BOT_TOKEN)
 
 user_states = {}  # For configuration steps
 user_running = {}  # For running clients: {user_id: {'client': client, 'target': target, 'user_channel': user_channel}}
@@ -264,7 +264,15 @@ async def start_forward(event):
         session_str = data['session']
 
         client = TelegramClient(StringSession(session_str), API_ID, API_HASH)
-        await client.start()
+        try:
+            await client.connect()
+            if not await client.is_user_authorized():
+                raise Exception('Session not authorized')
+            await client.start()
+        except Exception as e:
+            logger.error(f"Client connection error for user {user_id}: {e}")
+            await event.reply(f'Error connecting client: {str(e)}. Please reconfigure with /start.')
+            return
 
         me = await client.get_me()
         try:
