@@ -170,13 +170,8 @@ async def handle_message(event):
                 del user_states[user_id]
                 return
 
-            # Copy to StringSession
-            string_session = StringSession()
-            string_session.auth_key = temp_client.session.auth_key
-            string_session.dc_id = temp_client.session.dc_id
-            string_session.server_address = temp_client.session.server_address
-            string_session.port = temp_client.session.port
-            session_str = string_session.save()
+            # Save the session string directly
+            session_str = temp_client.session.save()
 
             os.remove('temp.session')
 
