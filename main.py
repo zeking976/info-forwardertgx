@@ -253,15 +253,23 @@ async def start_forward(event):
     try:
         decrypted = f.decrypt(encrypted)
         logger.info(f"Decrypted data successfully with password: {password}")  # Debug success
-        data = json.loads(decrypted.decode('utf-8'))
-        logger.info(f"Decrypted session string (partial): {data['session'][:20]}...")  # Log partial session for debug
+        try:
+            data = json.loads(decrypted.decode('utf-8'))
+            logger.info(f"Decrypted session string (partial): {data['session'][:20]}...")  # Log partial session for debug
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to parse decrypted JSON: {e}, raw data: {decrypted.decode('utf-8')}")
+            await event.reply('Invalid configuration data. Please reconfigure with /start.')
+            return
     except InvalidToken:
         logger.warning(f"Password mismatch for user {user_id} with input: {password}")
         await event.reply('Wrong password. Please ensure the password matches the one used during configuration and try again.')
         return
 
     try:
-        data = json.loads(decrypted.decode('utf-8'))
+        if not isinstance(data, dict) or 'target' not in data or 'user_channel' not in data or 'session' not in data:
+            logger.error(f"Invalid data structure: {data}")
+            await event.reply('Invalid configuration data. Please reconfigure with /start.')
+            return
         target = data['target']
         user_channel = data['user_channel']
         session_str = data['session']
