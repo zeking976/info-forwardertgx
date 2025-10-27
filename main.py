@@ -24,14 +24,16 @@ DEV_USER_ID = int(os.getenv('DEV_TELEGRAM_USER_ID'))
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Move database to /tmp to avoid readonly root filesystem issues
+# ---------------- Database setup ----------------
 db_path = '/tmp/bot.db'
 db_dir = os.path.dirname(db_path) or '/tmp'
+
 if not os.path.exists(db_path):
-    with open(db_path, 'a'):  # Create file with write access
+    with open(db_path, 'a'):
         pass
-    os.chmod(db_path, 0o664)  # Read/write for owner and group
-os.chmod(db_dir, 0o755)  # Ensure directory is writable
+    os.chmod(db_path, 0o664)
+os.chmod(db_dir, 0o755)
+
 try:
     conn = sqlite3.connect(db_path, check_same_thread=False)
     cur = conn.cursor()
@@ -55,6 +57,7 @@ except sqlite3.OperationalError as e:
                    (key TEXT PRIMARY KEY, value TEXT)''')
     conn.commit()
 
+
 def get_config(key):
     try:
         row = cur.execute('SELECT value FROM config WHERE key=?', (key,)).fetchone()
@@ -63,6 +66,7 @@ def get_config(key):
         logger.error(f"Error reading config: {e}")
         return None
 
+
 def set_config(key, value):
     try:
         cur.execute('INSERT OR REPLACE INTO config (key, value) VALUES (?, ?)', (key, value))
@@ -70,25 +74,27 @@ def set_config(key, value):
     except sqlite3.OperationalError as e:
         logger.error(f"Error writing config: {e}")
 
-# Default ca_filter to 'off' if not set
+
+# Default ca_filter = off
 if get_config('ca_filter') is None:
     set_config('ca_filter', 'off')
 
 bot_client = TelegramClient('bot', API_ID, API_HASH)
+user_states = {}
+user_running = {}
 
-user_states = {}  # For configuration steps
-user_running = {}  # For running clients: {user_id: {'client': client, 'target': target, 'user_channel': user_channel}}
-
+# ---------------- Crypto utils ----------------
 def derive_key(password):
-    salt = b'salt123'  # Fixed salt; in production, consider per-user random salt stored in db
+    salt = b'salt123'
     kdf = PBKDF2HMAC(
         algorithm=hashes.SHA256(),
         length=32,
         salt=salt,
         iterations=100000,
-        backend=default_backend()
+        backend=default_backend(),
     )
     return base64.urlsafe_b64encode(kdf.derive(password.encode()))
+
 
 def extract_contract_address(msg):
     text = getattr(msg, 'text', '') or getattr(msg, 'message', '') or ''
@@ -97,13 +103,9 @@ def extract_contract_address(msg):
         return {'ca': match.group(0)}
     return None
 
+
+# ---------------- Message handlers ----------------
 async def ca_handler(event):
-    """
-    Optimized Telegram handler:
-      - Processes only '🔥' messages
-      - Extracts and logs only contract addresses (no full message)
-      - Enqueues CA for processing
-    """
     try:
         msg = event.message
         raw_text = getattr(event, 'raw_text', None) or getattr(msg, 'text', '') or getattr(msg, 'message', '') or ''
@@ -114,31 +116,30 @@ async def ca_handler(event):
         first_line = cleaned.splitlines()[0] if cleaned.splitlines() else cleaned
         first_char = first_line[0] if first_line else ''
 
-        # Skip irrelevant messages
         if first_char in ('📈', '💰', '🏆'):
             return
         if not (first_line.startswith('🔥') or '🔥' in first_line):
             return
 
-        # Try extracting CA
         res = extract_contract_address(msg)
         if not res or not res.get('ca'):
             return
 
         ca = res['ca']
-
-        # ✅ Log only the essential info
-        logger.info('🔥 CA: %s', ca)
+        logger.info(f"🔥 CA: {ca}")
 
     except Exception as e:
-        logger.warning('Error in Telegram message handler: {e}')
+        logger.warning(f"Error in Telegram message handler: {e}")
 
+
+# ---------------- Commands ----------------
 @bot_client.on(events.NewMessage(pattern=r'^/start$'))
 async def start_config(event):
     user_id = event.sender_id
     if user_id not in user_states or user_states[user_id].get('state') != 'waiting_target':
         user_states[user_id] = {'state': 'waiting_target', 'data': {}}
         await event.reply('Info Forwarder:\nPlease provide the target channel ID.')
+
 
 @bot_client.on(events.NewMessage(func=lambda e: e.is_private and not e.message.message.startswith('/')))
 async def handle_message(event):
@@ -150,22 +151,20 @@ async def handle_message(event):
     data = user_states[user_id]['data']
 
     if state == 'waiting_target':
-        if not event.text:  # Skip if no input yet
+        if not event.text:
             return
         try:
-            target = int(event.text)
-            data['target'] = target
+            data['target'] = int(event.text)
             user_states[user_id]['state'] = 'waiting_user_channel'
             await event.reply('Now provide your channel ID.')
         except ValueError:
             await event.reply('Invalid ID. Try again.')
 
     elif state == 'waiting_user_channel':
-        if not event.text:  # Skip if no input yet
+        if not event.text:
             return
         try:
-            user_channel = int(event.text)
-            data['user_channel'] = user_channel
+            data['user_channel'] = int(event.text)
             user_states[user_id]['state'] = 'waiting_password'
             await event.reply('Now provide a password for encryption.')
         except ValueError:
@@ -173,19 +172,18 @@ async def handle_message(event):
 
     elif state == 'waiting_password':
         password = event.text
-        target = data.get('target')
-        user_channel = data.get('user_channel')
-        if target is None or user_channel is None:
-            await event.reply('Configuration error. Please restart with /start.')
+        if 'target' not in data or 'user_channel' not in data:
+            await event.reply('Configuration error. Restart with /start.')
             del user_states[user_id]
             return
         data['password'] = password
         user_states[user_id]['state'] = 'waiting_session'
-        await event.reply('Now upload the Telegram session file (must end with .session).')
+        await event.reply('Now upload the Telegram session file (.session).')
 
     elif state == 'waiting_session':
         if not event.message.document:
             return
+
         file_name = event.message.document.attributes[0].file_name if event.message.document.attributes else ''
         if not file_name.endswith('.session'):
             await event.reply('File must end with .session.')
@@ -195,108 +193,93 @@ async def handle_message(event):
             await event.message.download_media('temp.session')
             temp_client = TelegramClient('temp', API_ID, API_HASH)
             await temp_client.connect()
+
             if not await temp_client.is_user_authorized():
                 await event.reply('Session not authorized.')
                 os.remove('temp.session')
                 del user_states[user_id]
                 return
 
-            # Save the session string directly
             session_str = temp_client.session.save()
-            logger.info(f"Generated session string: {session_str[:20]}...")  # Log partial session for debug
-
             os.remove('temp.session')
 
-            # Get data
-            target = data.get('target')
-            user_channel = data.get('user_channel')
-            password = data.get('password')
-            if any(x is None for x in [target, user_channel, password]):
-                await event.reply('Configuration error. Please restart with /start.')
-                del user_states[user_id]
-                return
+            target = data['target']
+            user_channel = data['user_channel']
+            password = data['password']
 
-            # Encrypt data
-            data_to_encrypt = {'target': target, 'user_channel': user_channel, 'session': session_str}
-            json_bytes = json.dumps(data_to_encrypt).encode('utf-8')
+            json_bytes = json.dumps({'target': target, 'user_channel': user_channel, 'session': session_str}).encode('utf-8')
             key = derive_key(password)
             f = Fernet(key)
             encrypted = f.encrypt(json_bytes)
 
-            # Store
             cur.execute('INSERT OR REPLACE INTO users (user_id, encrypted_blob) VALUES (?, ?)', (user_id, encrypted))
             conn.commit()
 
-            await event.reply('Configuration saved successfully. Use /start_forward <password> to start forwarding.')
+            await event.reply('✅ Configuration saved.\nUse `/start_forward <password>` to start forwarding.')
             del user_states[user_id]
 
         except Exception as e:
-            await event.reply(f'Error: {str(e)}. Please try again.')
+            await event.reply(f'Error: {e}. Please try again.')
             if os.path.exists('temp.session'):
                 os.remove('temp.session')
             del user_states[user_id]
 
+
 @bot_client.on(events.NewMessage(pattern=r'^/start_forward (.*)$'))
 async def start_forward(event):
     user_id = event.sender_id
-    password = event.pattern_match.group(1).strip()  # Extract and clean password
-    logger.info(f"Attempting to start forwarding with password: {password}")  # Debug log
+    password = event.pattern_match.group(1).strip()
+    logger.info(f"User {user_id} requested start_forward with password: {password}")
 
     row = cur.execute('SELECT encrypted_blob FROM users WHERE user_id=?', (user_id,)).fetchone()
     if not row:
-        await event.reply('No configuration found. Use /start first.')
+        await event.reply('❌ No configuration found. Use /start first.')
         return
 
     encrypted = row[0]
-    key = derive_key(password)
-    f = Fernet(key)
+    if not isinstance(encrypted, (bytes, bytearray)):
+        encrypted = bytes(encrypted, 'utf-8')
+
     try:
-        decrypted = f.decrypt(encrypted)
-        logger.info(f"Decrypted data successfully with password: {password}")  # Debug success
-        try:
-            data = json.loads(decrypted.decode('utf-8'))
-            logger.info(f"Decrypted session string (partial): {data['session'][:20]}...")  # Log partial session for debug
-        except json.JSONDecodeError as e:
-            logger.error(f"Failed to parse decrypted JSON: {e}, raw data: {decrypted.decode('utf-8')}")
-            await event.reply('Invalid configuration data. Please reconfigure with /start.')
-            return
+        key = derive_key(password)
+        f = Fernet(key)
+        decrypted_bytes = f.decrypt(encrypted)
     except InvalidToken:
-        logger.warning(f"Password mismatch for user {user_id} with input: {password}")
-        await event.reply('Wrong password. Please ensure the password matches the one used during configuration and try again.')
+        await event.reply('❌ Wrong password. Please ensure it matches your setup password.')
+        return
+    except Exception as e:
+        logger.error(f"Decryption error: {e}")
+        await event.reply(f'❌ Error decrypting data: {e}')
         return
 
     try:
-        if not isinstance(data, dict) or 'target' not in data or 'user_channel' not in data or 'session' not in data:
-            logger.error(f"Invalid data structure: {data}")
-            await event.reply('Invalid configuration data. Please reconfigure with /start.')
-            return
-        target = data['target']
-        user_channel = data['user_channel']
-        session_str = data['session']
+        data = json.loads(decrypted_bytes.decode('utf-8'))
+        if not isinstance(data, dict):
+            raise ValueError("Decrypted data invalid")
+    except Exception as e:
+        logger.error(f"JSON parse error: {e}, raw={decrypted_bytes[:50]}")
+        await event.reply('❌ Invalid configuration data. Please reconfigure using /start.')
+        return
 
-        client = TelegramClient(StringSession(session_str), API_ID, API_HASH)
-        try:
-            await client.connect()
-            if not await client.is_user_authorized():
-                raise Exception('Session not authorized')
-            await client.start()
-        except Exception as e:
-            logger.error(f"Client connection error for user {user_id}: {e}")
-            await event.reply(f'Error connecting client: {str(e)}. Please reconfigure with /start.')
+    for key_field in ['target', 'user_channel', 'session']:
+        if key_field not in data:
+            await event.reply('❌ Configuration incomplete. Reconfigure using /start.')
             return
+
+    target, user_channel, session_str = data['target'], data['user_channel'], data['session']
+
+    try:
+        client = TelegramClient(StringSession(session_str), API_ID, API_HASH)
+        await client.connect()
+        if not await client.is_user_authorized():
+            raise Exception('Session not authorized')
+        await client.start()
 
         me = await client.get_me()
-        try:
-            perms = await client.get_permissions(user_channel, me)
-            if not perms.post_messages:
-                raise Exception('No post messages')
-        except Exception:
-            await bot_client.send_message(user_id, 'BOT IS NOT ADMIN IN YOUR CHANNEL/GROUP, ADD BOT AS ADMIN')
-            await client.disconnect()
-            return
+        logger.info(f"Session started for @{me.username or me.id}")
 
-        async def forward_handler(event):
-            await client.forward_messages(user_channel, event.message)
+        async def forward_handler(evt):
+            await client.forward_messages(user_channel, evt.message)
 
         client.add_event_handler(forward_handler, events.NewMessage(chats=target))
 
@@ -304,15 +287,12 @@ async def start_forward(event):
             client.add_event_handler(ca_handler, events.NewMessage(chats=target))
 
         user_running[user_id] = {'client': client, 'target': target, 'user_channel': user_channel}
-        await event.reply('Forwarding started.')
+        await event.reply('✅ Forwarding started successfully.')
+
     except Exception as e:
-        logger.error(f"Forwarding error for user {user_id}: {e}")
-        await event.reply(f'Error starting forwarding: {str(e)}. Please try again.')
-        if 'client' in locals():
-            try:
-                await client.disconnect()
-            except Exception as disconnect_err:
-                logger.error(f"Error during disconnect: {disconnect_err}")
+        logger.error(f"Forwarding setup error: {e}")
+        await event.reply(f'❌ Could not start forwarding: {e}')
+
 
 @bot_client.on(events.NewMessage(pattern=r'^/stop_forward$'))
 async def stop_forward(event):
@@ -325,28 +305,24 @@ async def stop_forward(event):
     try:
         await client.disconnect()
     except Exception as e:
-        logger.error(f"Error stopping forward for user {user_id}: {e}")
+        logger.error(f"Error stopping forward: {e}")
     del user_running[user_id]
-    await event.reply('Forwarding stopped.')
+    await event.reply('✅ Forwarding stopped.')
+
 
 @bot_client.on(events.NewMessage(pattern=r'^/settings$'))
 async def settings(event):
     user_id = event.sender_id
     if user_id != DEV_USER_ID:
-        await event.reply('This command is restricted to the developer.')
+        await event.reply('Restricted to developer.')
         return
 
     current = get_config('ca_filter') or 'off'
     markup = ReplyInlineMarkup(
-        rows=[
-            KeyboardButtonRow(
-                buttons=[
-                    KeyboardButtonCallback(text=f'CA📃 filter: {current.upper()}', data=b'toggle_ca')
-                ]
-            )
-        ]
+        rows=[KeyboardButtonRow([KeyboardButtonCallback(text=f'CA📃 filter: {current.upper()}', data=b'toggle_ca')])]
     )
     await event.reply('Settings', reply_markup=markup)
+
 
 @bot_client.on(events.NewMessage(pattern=r'^/delete_session$'))
 async def delete_session(event):
@@ -354,10 +330,11 @@ async def delete_session(event):
     try:
         cur.execute('DELETE FROM users WHERE user_id=?', (user_id,))
         conn.commit()
-        await event.reply('Session deleted successfully. Use /start to reconfigure.')
+        await event.reply('✅ Session deleted. Use /start to reconfigure.')
     except sqlite3.OperationalError as e:
-        logger.error(f"Error deleting session for user {user_id}: {e}")
-        await event.reply('Error deleting session. Please try again or check logs.')
+        logger.error(f"Error deleting session: {e}")
+        await event.reply('❌ Error deleting session. Try again.')
+
 
 @bot_client.on(events.CallbackQuery)
 async def handle_callback(event):
@@ -371,17 +348,10 @@ async def handle_callback(event):
         set_config('ca_filter', new)
 
         markup = ReplyInlineMarkup(
-            rows=[
-                KeyboardButtonRow(
-                    buttons=[
-                        KeyboardButtonCallback(text=f'CA📃 filter: {new.upper()}', data=b'toggle_ca')
-                    ]
-                )
-            ]
+            rows=[KeyboardButtonRow([KeyboardButtonCallback(text=f'CA📃 filter: {new.upper()}', data=b'toggle_ca')])]
         )
         await event.edit('Settings', reply_markup=markup)
 
-        # Handle running client
         if DEV_USER_ID in user_running:
             client = user_running[DEV_USER_ID]['client']
             if new == 'on':
@@ -390,19 +360,21 @@ async def handle_callback(event):
             else:
                 client.remove_event_handler(ca_handler)
 
+
+# ---------------- Runner ----------------
 async def main():
     try:
         await bot_client.start(bot_token=BOT_TOKEN)
         print('Bot is running.')
         await bot_client.run_until_disconnected()
     except Exception as e:
-        logger.error(f"Bot failed to start or run: {e}")
+        logger.error(f"Bot startup error: {e}")
     finally:
-        # Cleanup pending tasks
-        pending = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
-        for task in pending:
+        tasks = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
+        for task in tasks:
             task.cancel()
-        await asyncio.gather(*pending, return_exceptions=True)
+        await asyncio.gather(*tasks, return_exceptions=True)
+
 
 if __name__ == '__main__':
     asyncio.run(main())
