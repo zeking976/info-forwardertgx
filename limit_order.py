@@ -29,7 +29,7 @@ async def create_jupiter_limit_order(
         "outputMint": "So11111111111111111111111111111111111111112",
         "maker": str(wallet.pubkey()),
         "payer": str(wallet.pubkey()),
-        "params": {"makingAmount": making_amount, "takingAmount": taking_amount, "feeBps": "20"},
+        "params": {"makingAmount": making_amount, "takingAmount": taking_amount},
         "referralAccount": config["REFERRAL_ACCOUNT"],
         "referralFeeBps": config["REFERRAL_FEE_BPS"],
         "computeUnitPrice": "auto"
