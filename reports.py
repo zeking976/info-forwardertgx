@@ -18,7 +18,7 @@ def _save(file, data):
         json.dump(data, f, indent=2)
 
 
-def record_buy(ca, name, mcap, gross, net, fee):
+def record_buy(ca, name, mcap, gross, net, fee, tx_sig=None):
     trades = _load(TRADE_FILE)
     trades[ca] = {
         "buy": {
@@ -27,16 +27,23 @@ def record_buy(ca, name, mcap, gross, net, fee):
             "gross": gross,
             "net": net,
             "fee": fee,
-            "time": datetime.utcnow().isoformat()
+            "time": datetime.utcnow().isoformat(),
+            "tx_sig": tx_sig
         }
     }
     _save(TRADE_FILE, trades)
-    send_telegram_message(
+
+    msg = (
         f"✅BUY {name}\n"
         f"📃CA: `{ca}`\n"
         f"📊MCAP: ${mcap:,.0f}\n"
         f"💵Net: ${net:.2f}"
     )
+    if tx_sig:
+        short = tx_sig[:8]
+        msg += f"\nTX: [{short}...](https://solscan.io/tx/{tx_sig})"
+
+    send_telegram_message(msg)
 
 
 def record_limit_order(ca, price, amount, entry_price, take_profit_pct, stop_loss_pct):
