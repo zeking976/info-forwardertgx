@@ -29,8 +29,8 @@ class SniperBot:
 
     async def on_message(self, event):
         text = event.raw_text or ""
-        if not text.lstrip().startswith("fire"): return
-        if any(emoji in text for emoji in ("money bag", "trophy", "chart increasing")): return
+        if not text.lstrip().startswith("🔥"): return
+        if any(emoji in text for emoji in ("💰", "🏆", "📈")): return
         if ca := extract_ca(event.message):
             if ca not in await self.get_processed():
                 await self.queue.put(ca)
