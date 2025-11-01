@@ -36,10 +36,6 @@ class SniperBot:
             if ca not in await self.get_processed():
                 await self.queue.put(ca)
 
-    async def get_processed(self):
-        # Optional: load from file or cache
-        return set()
-
     async def worker(self):
         async with aiohttp.ClientSession() as session:
             while True:
@@ -69,26 +65,21 @@ class SniperBot:
                 if sig:
                     target_price = info["priceUsd"] * (1 + self.config["TAKE_PROFIT"] / 100)
                     
-                    # === CREATE LIMIT ORDER + RECORD + SEND TELEGRAM ===
-                    await create_jupiter_limit_order(
+                    # === CREATE + EXECUTE LIMIT ORDER + RECORD + SEND TELEGRAM ===
+                    sell_sig = await create_jupiter_limit_order(
                         session=session,
                         token_mint=ca,
                         amount=order_amount_lamports,
                         target_price=target_price,
-                        wallet_pubkey=str(self.wallet.pubkey()),
-                        config=self.config
-                    )
-
-                    await record_limit_order(
-                        ca=ca,
-                        price=target_price,
-                        amount=order_amount_lamports,
+                        wallet=self.wallet,  # pass wallet for signing
+                        config=self.config,
                         entry_price=info["priceUsd"],
                         take_profit_pct=self.config["TAKE_PROFIT"],
                         stop_loss_pct=abs(self.config["STOP_LOSS"])
                     )
 
-                    self.daily_buys += 1
-                    self.cycle += 1
+                    if sell_sig:
+                        self.daily_buys += 1
+                        self.cycle += 1
 
                 await sleep_with_logging(1.0, "1s polling")
