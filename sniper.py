@@ -1,4 +1,5 @@
 import asyncio
+from loguru import logger
 import aiohttp
 from telethon import TelegramClient, events
 from config import load_config
