@@ -62,8 +62,7 @@ async def execute_jupiter_buy(
 
             if res.get("status") == "success":
                 sig = res.get("signature")
-                record_buy(quote["outputMint"], coin_name, market_cap, usd_value, usd_value - fee_usd, fee_usd)
-                return sig
+                record_buy(quote["outputMint"], coin_name, market_cap, usd_value, usd_value - fee_usd, fee_usd, sig)
 
         except Exception as e:
             logging.warning(f"BUY attempt {attempt}/3 failed: {e}")
