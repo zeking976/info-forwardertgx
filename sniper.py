@@ -7,9 +7,10 @@ from limit_order import create_jupiter_limit_order
 from jupiter_price import get_mcap_and_price
 from filters import passes_filters
 from telegram import extract_ca
-from reports import record_buy
+from reports import record_buy, record_limit_order
 from utils import sleep_with_logging
 from solders.keypair import Keypair
+
 
 class SniperBot:
     def __init__(self, config):
@@ -66,14 +67,26 @@ class SniperBot:
 
                 if sig:
                     target_price = info["priceUsd"] * (1 + self.config["TAKE_PROFIT"] / 100)
+                    
+                    # === CREATE LIMIT ORDER + RECORD + SEND TELEGRAM ===
                     await create_jupiter_limit_order(
                         session=session,
                         token_mint=ca,
-                        amount=order_amount_lamports,  # or actual token amount from sig
+                        amount=order_amount_lamports,
                         target_price=target_price,
                         wallet_pubkey=str(self.wallet.pubkey()),
                         config=self.config
                     )
+
+                    await record_limit_order(
+                        ca=ca,
+                        price=target_price,
+                        amount=order_amount_lamports,
+                        entry_price=info["priceUsd"],
+                        take_profit_pct=self.config["TAKE_PROFIT"],
+                        stop_loss_pct=abs(self.config["STOP_LOSS"])
+                    )
+
                     self.daily_buys += 1
                     self.cycle += 1
 
