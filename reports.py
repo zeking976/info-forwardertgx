@@ -70,6 +70,25 @@ def record_limit_order(ca, price, amount, entry_price, take_profit_pct, stop_los
         f"💵Amount: ~${(amount / 1e9) * entry_price:.2f}"
     )
 
+def record_sell(ca: str, signature: str, profit_usd: float, is_tp: bool, profit_pct: float):
+    state = _load(STATE_FILE)
+    trade = _load(TRADE_FILE).get(ca, {}).get("buy", {})
+    name = trade.get("name", "Unknown")
+
+    order_type = "TAKE PROFIT" if is_tp else "STOP LOSS"
+    emoji = "Target" if is_tp else "Stop"
+
+    # Update compounding
+    update_compounding(profit_usd)
+
+    # Send Telegram
+    send_telegram_message(
+        f"📑 {order_type} HIT\n"
+        f"🪙Coin: {name}\n"
+        f"📃CA: `{ca}`\n"
+        f"💵Profit: ${profit_usd:+.2f} ({profit_pct:+.1f}%)\n"
+        f"✏️TX: [{signature[:8]}...](https://solscan.io/tx/{signature})"
+    )
 
 def update_compounding(profit_usd: float):
     state = _load(STATE_FILE)
