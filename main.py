@@ -30,17 +30,12 @@ async def main():
         config["TELEGRAM_API_HASH"]
     )
     # === EVENT HANDLER: fire ONLY + DEBUG + CA LOGIC ===
-    @bot.client.on(events.NewMessage(chats=int(config["TARGET_CHANNEL_ID"])))
-    async def handler(event):
+    @bot.client.on(events.NewMessage(chats=int(config["TARGET_CHANNEL_ID"])))    async def handler(event):
         text = (event.message.message or "").strip()
         logger.info(f"CHANNEL MSG: '{text}' | ID: {event.message.id}")
         # === MUST START WITH fire EMOJI (after spaces) ===
-        if not text.lstrip().startswith("🔥"):
-            logger.info("SKIPPED: no fire at start")
-            return
-        # === SKIP BLOCKED EMOJIS: chart money trophy ===
-        if any(e in text for e in ("📈", "💰", "🏆")):
-            logger.info("SKIPPED: Because (📈/💰/🏆)")
+        if text[0] != "🔥":
+            logger.info("Skipped because it does not start with 🔥")
             return
         # === EXTRACT CA ===
         ca = bot.extract_ca(event.message)
@@ -63,4 +58,4 @@ if __name__ == "__main__":
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
-        logger.info("Shutting down🔁...")
+        logger.info("Shutting down...")
