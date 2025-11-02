@@ -24,20 +24,17 @@ class SniperBot:
         self.cycle = 0
         self.processed_cas = set()
         self.next_reset = None
-
         # === SESSION STRING ===
         session_file = "/root/ux-solsniper/session_string.txt"
         if not os.path.exists(session_file):
             raise FileNotFoundError("session_string.txt not found! Run setup first.")
         with open(session_file, "r") as f:
             session_str = f.read().strip()
-
         self.client = TelegramClient(
             StringSession(session_str),
             int(config["TELEGRAM_API_ID"]),
             config["TELEGRAM_API_HASH"]
         )
-
     def extract_ca(self, message):
         """
         Extract Solana contract address from ANYWHERE in message:
@@ -49,11 +46,9 @@ class SniperBot:
         - With backticks, spaces, Unicode
         """
         import re
-
         # === 1. Get raw text + extract from message entities (links) ===
         text = getattr(message, "text", "") or message.message or ""
         full_text = text
-
         # Extract text from hyperlinks (e.g. [Link](https://...))
         if message.entities:
             for entity in message.entities:
@@ -61,25 +56,29 @@ class SniperBot:
                     url = entity.url
                     if url:
                         full_text += " " + url
-
         # === 2. Normalize: remove zero-width spaces, clean up ===
         full_text = re.sub(r'[\u200B-\u200D\uFEFF]', '', full_text)  # Remove ZWSP
         full_text = full_text.strip()
-
         # === 3. CA: format (any line) ===
         if "CA:" in full_text.upper():
             for line in full_text.split('\n'):
                 if "CA:" in line.upper():
-                    match = re.search(r'CA:\s*([1-9A-HJ-NP-Za-km-z]{44})', line, re.IGNORECASE)
+                    match = re.search(r'CA:\s*([1-9A-HJ-NP-Za-km-z]{44})', line, re.IGN
+ORECASE)
                     if match:
                         return match.group(1)
-
         # === 4. ANY 44-char Solana address (in text or links) ===
         matches = re.findall(r'\b[1-9A-HJ-NP-Za-km-z]{44}\b', full_text)
         if matches:
             return matches[0]  # Return first valid CA
-
         return None
+    async def start(self):
+        logger.info("UX-SolSniper Bot STARTED")
+        await self.client.start()
+        logger.info("Connected to Telegram")
+        # Schedule first midnight reset
+        self._schedule_next_reset()
+        # Start worker
         asyncio.create_task(self.worker())
         await self.client.run_until_disconnected()
     def _schedule_next_reset(self):
