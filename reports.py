@@ -37,10 +37,10 @@ def record_buy(ca, name, mcap, gross, net, fee, tx_sig=None):
     _save(TRADE_FILE, trades)
 
     msg = (
-        f"BUY {name}\n"
-        f"CA: `{ca}`\n"
-        f"MCAP: ${mcap:,.0f}\n"
-        f"Net: ${net:.2f}"
+        f"✅**BUY {name}**\n"
+        f"📃CA: `{ca}`\n"
+        f"📊MCAP: ${mcap:,.0f}\n"
+        f"💵Net: ${net:.2f}"
     )
     if tx_sig:
         short = tx_sig[:8]
@@ -71,11 +71,11 @@ def record_limit_order(ca, price, amount, entry_price, take_profit_pct, stop_los
 
     name = trades.get(ca, {}).get("buy", {}).get("name", "TKN_???")
     send_telegram_message(
-        f"{order_type} ORDER SET\n"
-        f"Coin: {name}\n"
-        f"CA: `{ca}`\n"
-        f"Entry: ${entry_price:.8f}\n"
-        f"Target: ${price:.8f} ({sign}{pct}%)\n"
+        f"📑**{order_type} ORDER SET**\n"
+        f"🪙Coin: {name}\n"
+        f"📃CA: `{ca}`\n"
+        f"🔫Entry: ${entry_price:.8f}\n"
+        f"📌Target: ${price:.8f} ({sign}{pct}%)\n"
         f"Value: ~${(amount / 1e9) * entry_price:.2f}"
     )
 
@@ -96,12 +96,13 @@ def record_sell(ca: str, signature: str, profit_usd: float, is_tp: bool, profit_
     state.pop(ca, None)
     _save(STATE_FILE, state)
 
+    # === TELEGRAM WITH FULL SOLSCAN LINK + BOLD ===
     send_telegram_message(
-        f"{order_type} HIT\n"
-        f"Coin: {name}\n"
-        f"CA: `{ca}`\n"
-        f"Profit: ${profit_usd:+.2f} ({profit_pct:+.1f}%)\n"
-        f"TX: [{signature[:8]}...](https://solscan.io/tx/{signature})"
+        f"**{order_type} HIT**\n"
+        f"🪙Coin: {name}\n"
+        f"📃CA: `{ca}`\n"
+        f"💸Profit: **${profit_usd:+.2f}** ({profit_pct:+.1f}%)\n"
+        f"🖊️TX: [{signature[:8]}...](https://solscan.io/tx/{signature})"
     )
 
 # === COMPOUNDING TRACKER ===
