@@ -10,7 +10,7 @@ from buy import execute_jupiter_buy
 from limit_order import create_jupiter_limit_order
 from jupiter_price import get_mcap_and_price
 from telegram import extract_ca
-from reports import record_buy, record_limit_order
+from reports import record_buy, record_limit_order, record_sell
 from utils import sleep_with_logging
 from solders.keypair import Keypair
 from datetime import datetime, time, timedelta
@@ -61,6 +61,32 @@ class SniperBot:
         self.next_reset = midnight
         logger.info(f"Daily buy limit resets at {midnight.strftime('%Y-%m-%d 00:00')}")
 
+    async def monitor_jupiter_order(self, order_id: str, ca: str, entry_price: float, amount: int, is_tp: bool):
+        """Poll Jupiter until order is filled → then record_sell with Solscan link"""
+        url = f"https://lite-api.jup.ag/trigger/v1/order/{order_id}"
+        async with aiohttp.ClientSession() as session:
+            while True:
+                try:
+                    async with session.get(url, timeout=10) as r:
+                        data = await r.json()
+                    status = data.get("status")
+                    if status == "filled":
+                        sig = data.get("signature")
+                        output_sol = int(data["outputAmount"]) / 1e9
+                        profit_usd = output_sol - (amount / 1e9) * entry_price
+                        profit_pct = (output_sol / ((amount / 1e9) * entry_price) - 1) * 100
+
+                        # === RECORD SELL WITH FULL SOLSCAN LINK ===
+                        record_sell(ca, sig, profit_usd, is_tp, profit_pct)
+                        logger.info(f"SELL FILLED: {'TP' if is_tp else 'SL'} | {sig[:8]}... | +${profit_usd:.2f}")
+                        break
+                    elif status == "cancelled":
+                        logger.info(f"Order cancelled: {order_id[:8]}...")
+                        break
+                except Exception as e:
+                    logger.debug(f"Polling order {order_id[:8]}... error: {e}")
+                await asyncio.sleep(15)
+
     async def worker(self):
         async with aiohttp.ClientSession() as session:
             while True:
@@ -100,9 +126,20 @@ class SniperBot:
                 if sig:
                     entry_price = info["priceUsd"]
 
+                    # === RECORD BUY ===
+                    record_buy(
+                        ca=ca,
+                        name=f"TKN_{ca[-6:]}",
+                        mcap=info["marketCap"],
+                        gross=amount / 1e9,
+                        net=amount / 1e9 * (1 - self.config["BUY_FEE_PERCENT"] / 100),
+                        fee=amount / 1e9 * self.config["BUY_FEE_PERCENT"] / 100,
+                        tx_sig=sig
+                    )
+
                     # === TAKE PROFIT ORDER ===
                     tp_price = entry_price * (1 + self.config["TAKE_PROFIT"] / 100)
-                    tp_sig = await create_jupiter_limit_order(
+                    tp_result = await create_jupiter_limit_order(
                         session=session,
                         token_mint=ca,
                         amount=amount,
@@ -115,10 +152,10 @@ class SniperBot:
                     )
 
                     # === STOP LOSS ORDER (if enabled) ===
-                    sl_sig = None
+                    sl_result = None
                     if self.config["STOP_LOSS"] != 0:
                         sl_price = entry_price * (1 - abs(self.config["STOP_LOSS"]) / 100)
-                        sl_sig = await create_jupiter_limit_order(
+                        sl_result = await create_jupiter_limit_order(
                             session=session,
                             token_mint=ca,
                             amount=amount,
@@ -130,10 +167,28 @@ class SniperBot:
                             stop_loss_pct=abs(self.config["STOP_LOSS"])
                         )
 
-                    # === ONLY COUNT AS SUCCESS IF AT LEAST ONE ORDER WAS PLACED ===
-                    if tp_sig or sl_sig:
+                    # === START MONITORING FOR FILLS ===
+                    if tp_result and "orderId" in tp_result:
+                        asyncio.create_task(self.monitor_jupiter_order(
+                            order_id=tp_result["orderId"],
+                            ca=ca,
+                            entry_price=entry_price,
+                            amount=amount,
+                            is_tp=True
+                        ))
+                    if sl_result and "orderId" in sl_result:
+                        asyncio.create_task(self.monitor_jupiter_order(
+                            order_id=sl_result["orderId"],
+                            ca=ca,
+                            entry_price=entry_price,
+                            amount=amount,
+                            is_tp=False
+                        ))
+
+                    # === SUCCESS COUNT ===
+                    if tp_result or sl_result:
                         self.daily_buys += 1
                         self.cycle += 1
-                        logger.info(f"SUCCESS✅: BUY + LIMIT ORDERS | CA📃: {ca} | Buys today: {self.daily_buys}")
+                        logger.info(f"SUCCESS: BUY + LIMIT ORDERS | CA: {ca} | Buys today: {self.daily_buys}")
 
                 await sleep_with_logging(1.0, "polling")
