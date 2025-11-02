@@ -26,22 +26,31 @@ class SniperBot:
         self.processed_cas = set()
         self.next_reset = None
 
-        # === StringSession: NO SQLITE, NO LOCKS ===
+        # === SESSION STRING ===
         session_file = "/root/ux-solsniper/session_string.txt"
-        if os.path.exists(session_file):
-            with open(session_file, "r") as f:
-                session_str = f.read().strip()
-            self.client = TelegramClient(
-                StringSession(session_str),
-                config["TELEGRAM_API_ID"],
-                config["TELEGRAM_API_HASH"]
-            )
-        else:
-            self.client = TelegramClient(
-                StringSession(),
-                config["TELEGRAM_API_ID"],
-                config["TELEGRAM_API_HASH"]
-            )
+        if not os.path.exists(session_file):
+            raise FileNotFoundError("session_string.txt not found! Run setup first.")
+
+        with open(session_file, "r") as f:
+            session_str = f.read().strip()
+
+        self.client = TelegramClient(
+            StringSession(session_str),
+            int(config["TELEGRAM_API_ID"]),
+            config["TELEGRAM_API_HASH"]
+        )
+
+    def extract_ca(self, message):
+        import re
+        text = message.message.strip()
+        if "CA:" in text.upper():
+            for line in text.split('\n'):
+                if "CA:" in line.upper():
+                    ca = line.split("CA:")[-1].strip().strip('`').strip()
+                    if len(ca) == 44 and re.match(r'^[1-9A-HJ-NP-Za-km-z]{44}$', ca):
+                        return ca
+        matches = re.findall(r'[1-9A-HJ-NP-Za-km-z]{44}', text)
+        return matches[0] if matches else None
 
     async def start(self):
         logger.info("UX-SolSniper Bot STARTED")
