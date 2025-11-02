@@ -1,8 +1,10 @@
 # sniper.py
 import asyncio
 import aiohttp
+import os
 from loguru import logger
 from telethon import TelegramClient
+from telethon.sessions import StringSession
 from config import load_config
 from buy import execute_jupiter_buy
 from limit_order import create_jupiter_limit_order
@@ -22,37 +24,47 @@ class SniperBot:
         self.daily_buys = 0
         self.cycle = 0
         self.processed_cas = set()
-        self.next_reset = None  # When daily limit resets (midnight)
+        self.next_reset = None
 
-        session_file = f"{config['SESSION_NAME']}.session"
-        self.client = TelegramClient(
-            session_file,
-            config["TELEGRAM_API_ID"],
-            config["TELEGRAM_API_HASH"]
-        )
+        # === StringSession: NO SQLITE, NO LOCKS ===
+        session_file = "/root/ux-solsniper/session_string.txt"
+        if os.path.exists(session_file):
+            with open(session_file, "r") as f:
+                session_str = f.read().strip()
+            self.client = TelegramClient(
+                StringSession(session_str),
+                config["TELEGRAM_API_ID"],
+                config["TELEGRAM_API_HASH"]
+            )
+        else:
+            self.client = TelegramClient(
+                StringSession(),
+                config["TELEGRAM_API_ID"],
+                config["TELEGRAM_API_HASH"]
+            )
 
     async def start(self):
         logger.info("UX-SolSniper Bot STARTED")
         await self.client.start()
         logger.info("Connected to Telegram")
 
-        # Initialize reset time
+        # Schedule first midnight reset
         self._schedule_next_reset()
 
+        # Start worker
         asyncio.create_task(self.worker())
         await self.client.run_until_disconnected()
 
     def _schedule_next_reset(self):
-        """Set next reset to midnight (00:00) of next day"""
         now = datetime.now()
         midnight = datetime.combine(now.date() + timedelta(days=1), time(0, 0))
         self.next_reset = midnight
-        logger.info(f"Daily buy limit will reset at {midnight.strftime('%Y-%m-%d 00:00')}")
+        logger.info(f"Daily buy limit resets at {midnight.strftime('%Y-%m-%d 00:00')}")
 
     async def worker(self):
         async with aiohttp.ClientSession() as session:
             while True:
-                # === WAIT UNTIL MIDNIGHT IF LIMIT REACHED ===
+                # === WAIT UNTIL MIDNIGHT IF DAILY LIMIT HIT ===
                 if self.daily_buys >= self.config["MAX_BUYS_PER_DAY"]:
                     now = datetime.now()
                     if now >= self.next_reset:
@@ -61,9 +73,9 @@ class SniperBot:
                         logger.info("Daily limit RESET. Ready for new buys.")
                     else:
                         wait_sec = (self.next_reset - now).total_seconds()
-                        logger.info(f"Daily limit reached. Waiting {wait_sec/3600:.1f}h until midnight...")
+                        logger.info(f"Daily limit reached. Sleeping {wait_sec/3600:.1f}h until midnight...")
                         await asyncio.sleep(wait_sec)
-                        continue  # Recheck
+                        continue
 
                 ca = await self.queue.get()
                 logger.info(f"Processing CA: {ca}")
@@ -101,6 +113,6 @@ class SniperBot:
                     if sell_sig:
                         self.daily_buys += 1
                         self.cycle += 1
-                        logger.info(f"SUCCESS: BUY + SELL | CA: {ca} | Buys today: {self.daily_buys}")
+                        logger.info(f"SUCCESS✅: BUY + SELL | CA📃: {ca} | Buys today: {self.daily_buys}")
 
                 await sleep_with_logging(1.0, "polling")
