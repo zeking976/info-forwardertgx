@@ -98,21 +98,42 @@ class SniperBot:
                 )
 
                 if sig:
-                    target_price = info["priceUsd"] * (1 + self.config["TAKE_PROFIT"] / 100)
-                    sell_sig = await create_jupiter_limit_order(
+                    entry_price = info["priceUsd"]
+
+                    # === TAKE PROFIT ORDER ===
+                    tp_price = entry_price * (1 + self.config["TAKE_PROFIT"] / 100)
+                    tp_sig = await create_jupiter_limit_order(
                         session=session,
                         token_mint=ca,
                         amount=amount,
-                        target_price=target_price,
+                        target_price=tp_price,
                         wallet=self.wallet,
                         config=self.config,
-                        entry_price=info["priceUsd"],
+                        entry_price=entry_price,
                         take_profit_pct=self.config["TAKE_PROFIT"],
-                        stop_loss_pct=abs(self.config["STOP_LOSS"])
+                        stop_loss_pct=0
                     )
-                    if sell_sig:
+
+                    # === STOP LOSS ORDER (if enabled) ===
+                    sl_sig = None
+                    if self.config["STOP_LOSS"] != 0:
+                        sl_price = entry_price * (1 - abs(self.config["STOP_LOSS"]) / 100)
+                        sl_sig = await create_jupiter_limit_order(
+                            session=session,
+                            token_mint=ca,
+                            amount=amount,
+                            target_price=sl_price,
+                            wallet=self.wallet,
+                            config=self.config,
+                            entry_price=entry_price,
+                            take_profit_pct=0,
+                            stop_loss_pct=abs(self.config["STOP_LOSS"])
+                        )
+
+                    # === ONLY COUNT AS SUCCESS IF AT LEAST ONE ORDER WAS PLACED ===
+                    if tp_sig or sl_sig:
                         self.daily_buys += 1
                         self.cycle += 1
-                        logger.info(f"SUCCESS✅: BUY + SELL | CA📃: {ca} | Buys today: {self.daily_buys}")
+                        logger.info(f"SUCCESS✅: BUY + LIMIT ORDERS | CA📃: {ca} | Buys today: {self.daily_buys}")
 
                 await sleep_with_logging(1.0, "polling")
