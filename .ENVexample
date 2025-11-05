@@ -2,3 +2,8 @@ API_ID=dummy
 API_HASH=dummy
 BOT_TOKEN=dummy
 DEV_TELEGRAM_USER_ID=dummy
+
+
+
+
+MONITOR_POLL_SEC
