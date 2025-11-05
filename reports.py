@@ -39,10 +39,10 @@ def record_buy(ca, name, mcap, gross, net, fee, tx_sig=None):
     _save(TRADE_FILE, trades)
 
     msg = (
-        f"BUY {escape_md(name)}\n"
-        f"CA: `{ca}`\n"
-        f"MCAP: ${mcap:,.0f}\n"
-        f"Net: ${net:.2f}"
+        f"✅BUY {escape_md(name)}\n"
+        f"📃CA: `{ca}`\n"
+        f"📊MCAP: ${mcap:,.0f}\n"
+        f"💵Net: ${net:.2f}"
     )
     if tx_sig:
         short = tx_sig[:8]
@@ -67,11 +67,11 @@ def record_sell(ca: str, signature: str, profit_usd: float, is_tp: bool, profit_
     _save(STATE_FILE, state)
 
     msg = (
-        f"**{order} HIT**\n"
-        f"Coin: {escape_md(name)}\n"
-        f"CA: `{ca}`\n"
-        f"Profit: **${profit_usd:+.2f}** ({profit_pct:+.1f}%)\n"
-        f"TX: [{signature[:8]}...](https://solscan.io/tx/{signature})"
+        f"📑**{order} HIT**\n"
+        f"🪙Coin: {escape_md(name)}\n"
+        f"📃CA: `{ca}`\n"
+        f"💸Profit: **${profit_usd:+.2f}** ({profit_pct:+.1f}%)\n"
+        f"🖋️TX: [{signature[:8]}...](https://solscan.io/tx/{signature})"
     )
 
     asyncio.create_task(
