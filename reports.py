@@ -1,7 +1,12 @@
 # /root/ux-solsniper/reports.py
 import json
 from datetime import datetime
-from utils import send_telegram_message
+import os
+from utils import send_telegram_message, escape_md  # ← ESCAPE ADDED
+
+# === CONFIG ===
+BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
+CHAT_ID   = os.getenv("TELEGRAM_CHAT_ID", "").strip()
 
 STATE_FILE = "position_state.json"
 TRADE_FILE = "trades_history.json"
@@ -9,9 +14,8 @@ TRADE_FILE = "trades_history.json"
 def _load(file):
     try:
         with open(file, "r") as f:
-            content = f.read().strip()
-            return json.loads(content) if content else {}
-    except (FileNotFoundError, json.JSONDecodeError):
+            return json.loads(f.read().strip() or "{}")
+    except Exception:
         return {}
 
 def _save(file, data):
@@ -35,41 +39,46 @@ def record_buy(ca, name, mcap, gross, net, fee, tx_sig=None):
     _save(TRADE_FILE, trades)
 
     msg = (
-        f"✅BUY {name}\n"
-        f"📃CA: `{ca}`\n"
-        f"📊MCAP: ${mcap:,.0f}\n"
-        f"💵Net: ${net:.2f}"
+        f"BUY {escape_md(name)}\n"
+        f"CA: `{ca}`\n"
+        f"MCAP: ${mcap:,.0f}\n"
+        f"Net: ${net:.2f}"
     )
     if tx_sig:
-        msg += f"\nTX: [{tx_sig[:8]}...](https://solscan.io/tx/{tx_sig})"
-    send_telegram_message(msg)
+        short = tx_sig[:8]
+        msg += f"\nTX: [{short}...](https://solscan.io/tx/{tx_sig})"
 
-# === RECORD SELL (MARKET SELL ON TP/SL HIT) ===
+    asyncio.create_task(
+        send_telegram_message(escape_md(msg), BOT_TOKEN, CHAT_ID)
+    )
+
+# === RECORD SELL ===
 def record_sell(ca: str, signature: str, profit_usd: float, is_tp: bool, profit_pct: float):
-    state = _load(STATE_FILE)
+    state  = _load(STATE_FILE)
     trades = _load(TRADE_FILE)
-    name = trades.get(ca, {}).get("buy", {}).get("name", "Unknown")
-    order_type = "TAKE PROFIT" if is_tp else "STOP LOSS"
+    name   = trades.get(ca, {}).get("buy", {}).get("name", "Unknown")
+    order  = "TAKE PROFIT" if is_tp else "STOP LOSS"
 
-    # Update compounding balance
+    # COMPOUND
     state["balance"] = round(state.get("balance", 0) + profit_usd, 2)
-    state["cycle"] = state.get("cycle", 0) + 1
+    state["cycle"]   = state.get("cycle", 0) + 1
     _save(STATE_FILE, state)
-
-    # Clean position
     state.pop(ca, None)
     _save(STATE_FILE, state)
 
-    # Telegram alert
-    send_telegram_message(
-        f"📑**{order_type} HIT**\n"
-        f"🪙Coin: {name}\n"
-        f"📃CA: `{ca}`\n"
-        f"💸Profit: **${profit_usd:+.2f}** ({profit_pct:+.1f}%)\n"
-        f"🖋️TX: [{signature[:8]}...](https://solscan.io/tx/{signature})"
+    msg = (
+        f"**{order} HIT**\n"
+        f"Coin: {escape_md(name)}\n"
+        f"CA: `{ca}`\n"
+        f"Profit: **${profit_usd:+.2f}** ({profit_pct:+.1f}%)\n"
+        f"TX: [{signature[:8]}...](https://solscan.io/tx/{signature})"
     )
 
-# === COMPOUNDING TRACKERS ===
+    asyncio.create_task(
+        send_telegram_message(escape_md(msg), BOT_TOKEN, CHAT_ID)
+    )
+
+# === TRACKERS ===
 def get_balance() -> float:
     return _load(STATE_FILE).get("balance", 0.0)
 
