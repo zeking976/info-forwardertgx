@@ -117,22 +117,26 @@ def record_buy(ca, name, mcap, gross, net, fee, tx_sig=None):
     )
 
 # === RECORD SELL ===
+# reports.py — UPDATED record_sell() with clean compounding + log
+
 def record_sell(ca: str, signature: str, profit_usd: float, is_tp: bool, profit_pct: float):
     state  = _load(STATE_FILE)
     trades = _load(TRADE_FILE)
     name   = trades.get(ca, {}).get("buy", {}).get("name", "Unknown")
     order  = "TAKE PROFIT" if is_tp else "STOP LOSS"
 
-    # UPDATE BALANCE
-    state["balance"] = round(state.get("balance", 0) + profit_usd, 2)
+    # === COMPOUND BALANCE ===
+    old_balance = state.get("balance", 0.0)
+    state["balance"] = round(old_balance + profit_usd, 2)
     state["cycle"]   = state.get("cycle", 0) + 1
-    _save(STATE_FILE, state)
+
+    logger.info(f"NEW BALANCE AFTER {profit_pct:+.1f}%: ${old_balance:.2f} → ${state['balance']:.2f}")
+
+    # === CLEANUP POSITION ===
     state.pop(ca, None)
     _save(STATE_FILE, state)
 
-    # UPDATE STATS
-    stats = _update_daily_stats(is_tp, profit_usd)
-
+    # === TELEGRAM ALERT ===
     msg = (
         f"📑**{order} HIT**\n"
         f"🪙Coin: {escape_md(name)}\n"
@@ -145,15 +149,11 @@ def record_sell(ca: str, signature: str, profit_usd: float, is_tp: bool, profit_
         send_telegram_message(escape_md(msg), BOT_TOKEN, CHAT_ID)
     )
 
-    # AUTO-REPORT AFTER MAX BUYS
-    if stats["buys"] >= MAX_BUYS_PER_DAY:
-        asyncio.create_task(asyncio.sleep(5))  # tiny delay
-        _send_daily_report()
-
 # === TRACKERS ===
 def get_balance() -> float:
-    return _load(STATE_FILE).get("balance", 0.0)
-
+    balance = _load(STATE_FILE).get("balance", 0.0)
+    logger.info(f"COMPOUND BALANCE: ${balance:.2f}")  # ← LOG EVERY CALL
+    return balance
 def get_cycle() -> int:
     return _load(STATE_FILE).get("cycle", 0)
 
