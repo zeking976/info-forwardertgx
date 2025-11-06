@@ -14,6 +14,7 @@ from sell import monitor_and_sell
 from jupiter_price import get_mcap_and_price
 from jupiter_price import get_sol_price_usd
 from reports import record_buy
+from reports import get_balance
 from utils import sleep_with_logging
 from solders.keypair import Keypair
 from datetime import datetime, time, timedelta
@@ -60,7 +61,6 @@ async def compute_amount_from_usd(session, config, ca=None):
         return 0
 
     # === COMPOUNDING: Use current balance from reports, not fixed DAILY_CAPITAL_USD ===
-    from reports import get_balance
     current_balance_usd = get_balance()
 
     # Fallback to DAILY_CAPITAL_USD only if balance is 0 (first buy or reset)
