@@ -1,7 +1,6 @@
-# /root/ux-solsniper/utils.py
 import asyncio
 from loguru import logger
-import aiohttp  # ← ASYNC = NO BLOCKING
+import aiohttp
 import os
 
 async def sleep_with_logging(sec: float, reason: str = ""):
