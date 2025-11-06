@@ -43,6 +43,7 @@ async def get_token_balance(wallet: Keypair, token_mint: str) -> int:
         logger.warning(f"Failed to fetch balance for {token_mint[:6]}...: {e}")
         return 0
 
+# sniper.py — UPDATED compute_amount_from_usd() with COMPOUNDING
 async def compute_amount_from_usd(session, config, ca=None):
     sol_price = 0.0
     for attempt in range(1, 4):
@@ -53,17 +54,33 @@ async def compute_amount_from_usd(session, config, ca=None):
         except Exception as e:
             logger.warning("Attempt %d/3: get_sol_price_usd() failed: %s", attempt, e)
         await asyncio.sleep(attempt * 1.5)
+
     if not sol_price or sol_price <= 0:
         logger.error("Could not fetch SOL price. Skipping buy.")
         return 0
 
-    usd_capital = float(config.get("DAILY_CAPITAL_USD", 0.0))
+    # === COMPOUNDING: Use current balance from reports, not fixed DAILY_CAPITAL_USD ===
+    from reports import get_balance
+    current_balance_usd = get_balance()
+
+    # Fallback to DAILY_CAPITAL_USD only if balance is 0 (first buy or reset)
+    if current_balance_usd <= 0:
+        current_balance_usd = float(config.get("DAILY_CAPITAL_USD", 0.0))
+        logger.info("COMPOUNDING: Starting with initial capital: $%.2f", current_balance_usd)
+    else:
+        logger.info("COMPOUNDING: Using current balance: $%.2f", current_balance_usd)
+
+    # Use 80% of current balance per buy (configurable later)
+    buy_usd = current_balance_usd * 0.8
     buy_fee_pct = float(config.get("BUY_FEE_PERCENT", 0.0))
-    sol_equivalent = usd_capital / sol_price
+    sol_equivalent = buy_usd / sol_price
     sol_after_fee = sol_equivalent * (1.0 - buy_fee_pct / 100.0)
     lamports = int(round(sol_after_fee * 1e9))
 
-    logger.info("Buying: $%.2f → %.6f SOL → %d lamports", usd_capital, sol_after_fee, lamports)
+    logger.info(
+        "COMPOUND BUY | Balance: $%.2f → Using: $%.2f → %.6f SOL → %d lamports",
+        current_balance_usd, buy_usd, sol_after_fee, lamports
+    )
     return lamports
 
 class SniperBot:
