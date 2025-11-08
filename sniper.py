@@ -13,75 +13,15 @@ from buy import execute_jupiter_buy
 from sell import monitor_and_sell
 from jupiter_price import get_mcap_and_price
 from jupiter_price import get_sol_price_usd
-from reports import record_buy
+from jupiter_price import get_token_balance
 from reports import get_balance
+from reports import record_buy
 from utils import sleep_with_logging
+from utils import compute_amount_from_usd
 from solders.keypair import Keypair
 from datetime import datetime, time, timedelta
 
 logger = logging.getLogger(__name__)
-
-async def get_token_balance(wallet: Keypair, token_mint: str) -> int:
-    wallet_address = str(wallet.pubkey())
-    url = f"https://lite-api.jup.ag/ultra/v1/holdings/{wallet_address}"
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url, timeout=10) as resp:
-                if resp.status != 200:
-                    logger.warning(f"Jupiter API error {resp.status} for wallet {wallet_address}")
-                    return 0
-                data = await resp.json()
-        if token_mint in data.get("tokens", {}):
-            token_list = data["tokens"][token_mint]
-            if token_list and len(token_list) > 0:
-                amount_raw = token_list[0].get("amount")
-                if isinstance(amount_raw, str) and amount_raw.isdigit():
-                    return int(amount_raw)
-                elif isinstance(amount_raw, (int, float)):
-                    return int(amount_raw)
-        return 0
-    except Exception as e:
-        logger.warning(f"Failed to fetch balance for {token_mint[:6]}...: {e}")
-        return 0
-
-# sniper.py — FULL 100% COMPOUNDING (NO 80% CAP)
-async def compute_amount_from_usd(session, config, ca=None):
-    sol_price = 0.0
-    for attempt in range(1, 4):
-        try:
-            sol_price = await get_sol_price_usd(session)
-            if sol_price and sol_price > 0:
-                break
-        except Exception as e:
-            logger.warning("Attempt %d/3: get_sol_price_usd() failed: %s", attempt, e)
-        await asyncio.sleep(attempt * 1.5)
-
-    if not sol_price or sol_price <= 0:
-        logger.error("Could not fetch SOL price. Skipping buy.")
-        return 0
-
-    # === FULL COMPOUNDING: 100% of current balance ===
-    from reports import get_balance
-    current_balance_usd = get_balance()
-
-    if current_balance_usd <= 0:
-        current_balance_usd = float(config.get("DAILY_CAPITAL_USD", 0.0))
-        logger.info("COMPOUNDING: Starting with initial capital: $%.2f", current_balance_usd)
-    else:
-        logger.info("COMPOUNDING: Using full current balance: $%.2f", current_balance_usd)
-
-    # USE 100% OF BALANCE (no 80% cap)
-    buy_usd = current_balance_usd
-    buy_fee_pct = float(config.get("BUY_FEE_PERCENT", 0.0))
-    sol_equivalent = buy_usd / sol_price
-    sol_after_fee = sol_equivalent * (1.0 - buy_fee_pct / 100.0)
-    lamports = int(round(sol_after_fee * 1e9))
-
-    logger.info(
-        "COMPOUND BUY | Balance: $%.2f → Using: $%.2f → %.6f SOL → %d lamports",
-        current_balance_usd, buy_usd, sol_after_fee, lamports
-    )
-    return lamports
 
 class SniperBot:
     def __init__(self, config):
@@ -213,10 +153,10 @@ class SniperBot:
                 )
 
                 # GET REAL BALANCE
-                token_balance = await get_token_balance(self.wallet, ca)
+                token_balance, _ = await get_token_balance(self.wallet, ca, session)
                 if token_balance <= 0:
-                    logger.warning(f"No tokens received: {ca}")
-                    continue
+                    logger.info("No balance → skipping")
+                    return
 
                 logger.info(f"Received {token_balance / 1e9:.6f} tokens")
 
