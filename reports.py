@@ -1,4 +1,3 @@
-
 import json
 import os
 import asyncio
@@ -36,7 +35,7 @@ def _save_stats(stats):
 def _update_daily_stats(is_tp: bool, profit_usd: float):
     stats = _load_stats()
     today = datetime.utcnow().strftime("%Y-%m-%d")
-    
+
     if stats.get("date") != today:
         stats = {
             "date": today,
@@ -47,17 +46,17 @@ def _update_daily_stats(is_tp: bool, profit_usd: float):
             "wins": [],
             "losses": []
         }
-    
+
     stats["buys"] += 1
     stats["total_profit"] = round(stats["total_profit"] + profit_usd, 2)
-    
+
     if is_tp:
         stats["tp_count"] += 1
         stats["wins"].append(profit_usd)
     else:
         stats["sl_count"] += 1
         stats["losses"].append(profit_usd)
-    
+
     _save_stats(stats)
     return stats
 
@@ -118,22 +117,18 @@ def record_buy(ca, name, mcap, gross, net, fee, tx_sig=None):
     )
 
 # === RECORD SELL ===
-# reports.py — UPDATED record_sell() with clean compounding + log
-
 def record_sell(ca: str, signature: str, profit_usd: float, is_tp: bool, profit_pct: float):
-    state  = _load(STATE_FILE)
-    trades = _load(TRADE_FILE)
-    name   = trades.get(ca, {}).get("buy", {}).get("name", "Unknown")
-    order  = "TAKE PROFIT" if is_tp else "STOP LOSS"
-
-    # === COMPOUND BALANCE ===
+    state = _load(STATE_FILE)
     old_balance = state.get("balance", 0.0)
-    state["balance"] = round(old_balance + profit_usd, 2)
-    state["cycle"]   = state.get("cycle", 0) + 1
+    
+    # UPDATE BALANCE WITH P&L
+    new_balance = round(old_balance + profit_usd, 2)
+    state["balance"] = max(new_balance, 0.0)  # never go negative
+    state["cycle"] = state.get("cycle", 0) + 1
 
-    logger.info(f"NEW BALANCE AFTER {profit_pct:+.1f}%: ${old_balance:.2f} → ${state['balance']:.2f}")
-
-    # === CLEANUP POSITION ===
+    order = "TAKE PROFIT" if is_tp else "STOP LOSS"
+    logger.info(f"NEW BALANCE AFTER {profit_pct:+.1f}%: ${old_balance:.2f} to ${state['balance']:.2f}")
+    
     state.pop(ca, None)
     _save(STATE_FILE, state)
 
