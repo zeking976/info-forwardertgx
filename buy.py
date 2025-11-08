@@ -1,29 +1,19 @@
 # /root/ux-solsniper/buy.py
 import aiohttp
-import asyncio
+import asyncio                      # ← THIS WAS MISSING IN YOUR FILE
 import base64
+import traceback
 from loguru import logger
+from utils import compute_amount_from_usd
 from solders.keypair import Keypair
 from solders.transaction import VersionedTransaction
 from solders.message import to_bytes_versioned
-from utils import sleep_with_logging
 from reports import record_buy
 from jupiter_price import get_sol_price_usd
 
 ORDER_URL = "https://lite-api.jup.ag/ultra/v1/order"
 EXEC_URL  = "https://lite-api.jup.ag/ultra/v1/execute"
 
-# === CHECK SOL BEFORE BUY ===
-async def get_sol_balance(wallet: Keypair, session: aiohttp.ClientSession) -> float:
-    try:
-        url = f"https://lite-api.jup.ag/ultra/v1/holdings/{wallet.pubkey()}"
-        async with session.get(url, timeout=8) as r:
-            data = await r.json()
-            return float(data["sol"]["uiAmount"])
-    except:
-        return 0.0
-
-# === MAIN BUY FUNCTION (FIXED SIGNATURE) ===
 async def execute_jupiter_buy(
     session: aiohttp.ClientSession,
     *,
@@ -37,14 +27,19 @@ async def execute_jupiter_buy(
 ) -> str | None:
     """Execute a Jupiter buy transaction via Ultra API."""
     try:
-        sol_price_usd = await get_sol_price_usd(session)
-        sol_amount = config["DAILY_CAPITAL_USD"] / sol_price_usd
-        amount = int(sol_amount * 1e9 * (1 - config["BUY_FEE_PERCENT"] / 100))
-        usd_value = (amount / 1e9) * sol_price_usd
+        # === USE COMPOUNDING LOGIC ===
+        amount = await compute_amount_from_usd(session, config, output_mint)
+        if amount <= 0:
+            logger.info("Buy skipped: amount = 0")
+            return None
+
+        usd_value = (amount / 1e9) * await get_sol_price_usd(session)
         fee_usd = usd_value * (config["BUY_FEE_PERCENT"] / 100)
+
         if config["DRY_RUN"]:
             record_buy(output_mint, coin_name, market_cap, usd_value, usd_value - fee_usd, fee_usd)
             return f"DRY_RUN_BUY_{int(asyncio.get_running_loop().time())}"
+
         params = {
             "inputMint": input_mint,
             "outputMint": output_mint,
@@ -90,14 +85,9 @@ async def execute_jupiter_buy(
                 await asyncio.sleep(1)
         logger.info(f"❌  BUY failed after 3 retries")
         return None
-    except Exception as e:
-        logger.info(f"Fatal BUY error: {e}")
-        return None
 
-async def _get_sol_price(session):
-    try:
-        async with session.get("https://lite-api.jup.ag/price/v3?ids=So11111111111111111111111111111111111111112", timeout=10) as r:
-            data = await r.json()
-            return float(data["So11111111111111111111111111111111111111112"]["usdPrice"])
-    except:
-        return 150.0
+    except Exception as e:
+        print(f"BUY FAILED | {output_mint[:6] if output_mint else 'UNKNOWN'}... | {e}")
+        print("FULL TRACEBACK:")
+        traceback.print_exc()
+        return None
