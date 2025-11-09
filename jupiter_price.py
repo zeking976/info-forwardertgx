@@ -133,36 +133,3 @@ async def get_token_price(mint: str, session: aiohttp.ClientSession) -> float:
 
     logger.warning("ALL PRICE SOURCES FAILED → 0.0")
     return 0.0
-
-
-async def get_token_balance(wallet, mint, session):
-    wallet_address = str(wallet.pubkey())
-    # === JUPITER PRIMARY (3 retries) ===
-    for attempt in range(1, 3):
-        try:
-            url = f"https://lite-api.jup.ag/ultra/v1/holdings/{wallet_address}"
-            async with session.get(url, timeout=10) as resp:
-                if resp.status == 429:
-                    logger.warning(f"Jupiter 429 → retry {attempt}/3 in {attempt}s")
-                    await asyncio.sleep(attempt)
-                    continue
-                if resp.status != 200:
-                    logger.warning(f"Jupiter error {resp.status}")
-                    break
-                data = await resp.json()
-            token = next((t for t in data.get("tokens", {}).get(mint, [])), None)
-            if token:
-                ui_amount = token.get("uiAmount", 0.0)
-                decimals = token.get("decimals", 6)
-                if ui_amount > 0:
-                    logger.debug(f"JUPITER UI: {ui_amount:.6f} tokens ({decimals} decimals)")
-                    return ui_amount, decimals
-                amount_raw = token.get("amount")
-                if amount_raw:
-                    lamports = int(amount_raw)
-                    tokens = lamports / (10 ** decimals)
-                    logger.debug(f"JUPITER RAW → {tokens:.6f} tokens")
-                    return tokens, decimals
-        except Exception as e:
-            logger.warning(f"Jupiter attempt {attempt}/3 failed: {e}")
-            await asyncio.sleep(attempt)
