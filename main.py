@@ -41,8 +41,8 @@ async def main():
         logger.info(f"CHANNEL MSG: '{text}' | ID: {event.message.id}")
 
         # === MUST START WITH fire EMOJI (after spaces) ===
-        if text[0] != "馃敟":
-            logger.info("Skipped because it does not start with 馃敟")
+        if text[0] != "🔥":
+            logger.info("Skipped because it does not start with 🔥")
             return
 
         # === EXTRACT CA ===
