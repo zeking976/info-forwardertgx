@@ -14,6 +14,7 @@ from jupiter_price import get_token_price
 ORDER_URL = "https://lite-api.jup.ag/ultra/v1/order"
 EXEC_URL = "https://lite-api.jup.ag/ultra/v1/execute"
 
+# sell.py — FINAL VERSION
 async def monitor_and_sell(
     ca: str,
     entry_price: float,
@@ -26,7 +27,6 @@ async def monitor_and_sell(
     tp_price = entry_price * (1 + tp_pct / 100)
     sl_price = entry_price * (1 - sl_pct / 100)
     sold = False
-    log_counter = 0
     logger.info(f"MONITOR STARTED | {ca[:6]}... | Entry ${entry_price:.8f} | TP ${tp_price:.8f} | SL ${sl_price:.8f}")
 
     while not sold:
@@ -35,21 +35,14 @@ async def monitor_and_sell(
             logger.debug(f"Price invalid ({price}) → retry")
             await asyncio.sleep(1)
             continue
-        # === NORMAL LOGIC ===
-        usd_value = token_amount * price
-        log_counter += 1
-        if log_counter >= 5:
-            logger.info(
-                f"POLLER | {ca[:6]}... | ${price:.8f} | Bal: {token_amount:,.2f} | ${usd_value:.2f}"
-            )
-            log_counter = 0
 
-        # TP / SL
+        # === TP / SL CHECK ===
         if price >= tp_price:
             logger.info(f"TP HIT @ ${price:.8f}")
             sig = await execute_ultra_sell(session, ca, wallet, config)
             if sig:
-                profit_usd = (price - entry_price) * token_amount
+                # Balance fetched inside execute_ultra_sell()
+                profit_usd = (price - entry_price) * (await get_token_balance(wallet, ca, session))[0]
                 record_sell(ca, sig, profit_usd, True, (price/entry_price-1)*100)
                 sold = True
             break
@@ -58,7 +51,7 @@ async def monitor_and_sell(
             logger.info(f"SL HIT @ ${price:.8f}")
             sig = await execute_ultra_sell(session, ca, wallet, config)
             if sig:
-                profit_usd = (price - entry_price) * token_amount
+                profit_usd = (price - entry_price) * (await get_token_balance(wallet, ca, session))[0]
                 record_sell(ca, sig, profit_usd, False, (price/entry_price-1)*100)
                 sold = True
             break
