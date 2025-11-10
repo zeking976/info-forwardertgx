@@ -41,8 +41,6 @@ async def monitor_and_sell(
             logger.info(f"TP HIT @ ${price:.8f}")
             sig = await execute_ultra_sell(session, ca, wallet, config)
             if sig:
-                # Balance fetched inside execute_ultra_sell()
-                profit_usd = (price - entry_price) * (await get_token_balance(wallet, ca, session))[0]
                 record_sell(ca, sig, profit_usd, True, (price/entry_price-1)*100)
                 sold = True
             break
@@ -51,7 +49,6 @@ async def monitor_and_sell(
             logger.info(f"SL HIT @ ${price:.8f}")
             sig = await execute_ultra_sell(session, ca, wallet, config)
             if sig:
-                profit_usd = (price - entry_price) * (await get_token_balance(wallet, ca, session))[0]
                 record_sell(ca, sig, profit_usd, False, (price/entry_price-1)*100)
                 sold = True
             break
