@@ -10,6 +10,7 @@ from solders.message import to_bytes_versioned
 from reports import record_sell
 from utils import sleep_with_logging
 from jupiter_price import get_token_price
+from jupiter_price import get_token_balance
 
 ORDER_URL = "https://lite-api.jup.ag/ultra/v1/order"
 EXEC_URL = "https://lite-api.jup.ag/ultra/v1/execute"
