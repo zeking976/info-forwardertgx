@@ -152,14 +152,6 @@ class SniperBot:
                     tx_sig=sig
                 )
 
-                # GET REAL BALANCE
-                token_balance, _ = await get_token_balance(self.wallet, ca, session)
-                if token_balance <= 0:
-                    logger.info("No balance → skipping")
-                    return
-
-                logger.info(f"Received {token_balance / 1e9:.6f} tokens")
-
                 # START TP/SL MONITOR (INSTANT)
                 asyncio.create_task(
                     monitor_and_sell(
