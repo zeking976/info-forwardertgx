@@ -160,6 +160,7 @@ class SniperBot:
                         tp_pct=self.config["TAKE_PROFIT"],
                         sl_pct=abs(float(self.config["STOP_LOSS"])),
                         wallet=self.wallet,
+                        token_name=f"TKN_{ca[-6:]}",
                         config=self.config,
                         session=session
                     )
