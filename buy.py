@@ -1,7 +1,8 @@
 # /root/ux-solsniper/buy.py
 import aiohttp
-import asyncio
+import asyncio                      # ← THIS WAS MISSING IN YOUR FILE
 import base64
+import traceback
 from loguru import logger
 from utils import compute_amount_from_usd
 from solders.keypair import Keypair
@@ -83,4 +84,10 @@ async def execute_jupiter_buy(
                 logger.info(f"BUY attempt {attempt}/3 → {e}")
                 await asyncio.sleep(1)
         logger.info(f"❌  BUY failed after 3 retries")
+        return None
+
+    except Exception as e:
+        print(f"BUY FAILED | {output_mint[:6] if output_mint else 'UNKNOWN'}... | {e}")
+        print("FULL TRACEBACK:")
+        traceback.print_exc()
         return None
