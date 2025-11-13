@@ -117,7 +117,7 @@ def record_buy(ca, name, mcap, gross, net, fee, tx_sig=None):
     )
 
 # === RECORD SELL ===
-def record_sell(ca: str, signature: str, profit_usd: float, is_tp: bool, profit_pct: float):
+def record_sell(ca: str, signature: str, profit_usd: float, is_tp: bool, profit_pct: float, name: str):
     state = _load(STATE_FILE)
     old_balance = state.get("balance", 0.0)
     
